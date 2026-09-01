@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: #FDFCFB;
+    color: #1A1A1A;
+  }
+
+  h1, h2, h3, .font-serif, .editorial-heading {
+    font-family: 'Newsreader', Georgia, Cambria, serif;
+  }
+
+  .font-display {
+    font-family: 'Cinzel', 'Newsreader', Georgia, serif;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+/* Custom editorial parchment scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F4EFEB;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #D1CEC9;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #A6A29C;
+}
+
+/* Editorial utility classes */
+.editorial-card {
+  background-color: #FFFFFF;
+  border: 1px solid #EBE8E4;
+}
+
+.editorial-card-warm {
+  background-color: #F9F7F4;
+  border: 1px solid #EBE8E4;
+}
+
+.editorial-header-border {
+  border-bottom: 2px solid #1A1A1A;
+}
+
+.editorial-gold {
+  color: #C5A059;
+}
