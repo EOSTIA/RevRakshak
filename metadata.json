@@ -1,0 +1,6 @@
+{
+  "name": "RevRakshak - Revenue Recovery Control Plane",
+  "description": "Autonomous AI revenue recovery platform for Razorpay merchants featuring root-cause diagnosis, LSTM autoencoder anomaly gating, and bounded execution workflows.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
