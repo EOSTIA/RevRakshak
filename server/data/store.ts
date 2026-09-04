@@ -23,6 +23,13 @@ import {
 } from './mockData.js';
 
 import { buildTrainingSamplesFromCases, sequenceAutoencoderModel } from '../services/mlModel.js';
+import { sqliteStore } from '../services/sqliteStore.js';
+import { redisStore } from '../services/redisStore.js';
+import { kafkaBus } from '../services/kafkaBus.js';
+import { razorpayOfflineAdapter } from '../services/razorpayAdapter.js';
+import crypto from 'node:crypto';
+import { evaluateCompliance } from '../services/compliance.js';
+import { scoreWithPythonLstm } from '../services/lstmClient.js';
 
 class DataStore {
   public cases: RecoveryCase[] = JSON.parse(JSON.stringify(INITIAL_RECOVERY_CASES));
@@ -452,15 +459,53 @@ class DataStore {
   }
 
   // Execute Action on Case
-  public executeAction(caseId: string, actionType: ActionType, customReason?: string): { success: boolean; case: RecoveryCase; message: string } {
+  public async executeAction(caseId: string, actionType: ActionType, customReason?: string): Promise<{ success: boolean; case: RecoveryCase; message: string }> {
     const targetCase = this.getCaseById(caseId);
     if (!targetCase) {
       throw new Error(`Case ${caseId} not found`);
     }
 
+    if (['ACTION_EXECUTED', 'CUSTOMER_CONTACTED', 'PAYMENT_RECOVERED', 'HUMAN_REVIEW'].includes(targetCase.status)) {
+      return { success: false, case: targetCase, message: `Bounded action policy blocked execution because case is already ${targetCase.status}.` };
+    }
+
+    const pythonPrediction = await scoreWithPythonLstm(targetCase.customer.paymentSequence);
+    if (pythonPrediction) targetCase.anomalyResult = pythonPrediction;
+
+    const idempotencyKey = `recovery:${targetCase.id}:bounded-action`;
+    const reservation = await sqliteStore.reserve(idempotencyKey, actionType, 'Action gateway reservation');
+    if (reservation.duplicate && !reservation.stale) {
+      return { success: false, case: targetCase, message: `Duplicate action blocked by durable idempotency key ${idempotencyKey}.` };
+    }
+    if (reservation.stale) {
+      return { success: false, case: targetCase, message: 'Previous worker lease expired; action escalated for manual review.' };
+    }
+    const lockKey = `recovery:lock:${targetCase.id}`;
+    const lockAcquired = await redisStore.setIfNotExists(lockKey, { idempotencyKey, acquiredAt: new Date().toISOString() }, 30);
+    if (!lockAcquired) {
+      await sqliteStore.finalizeReservation(idempotencyKey, 'LOCKED', 'Another worker is processing this recovery case');
+      return { success: false, case: targetCase, message: 'Recovery case is already being processed by another worker.' };
+    }
+
+    const executor = await sqliteStore.reserveExecutor(idempotencyKey);
+    if (executor.duplicate) {
+      await redisStore.del(lockKey);
+      return { success: false, case: targetCase, message: `Duplicate executor call blocked; cached state is ${executor.state}.` };
+    }
+
     // Action Gateway deterministic validation check
     const isVetoed = targetCase.anomalyResult.decision === 'VETO' && !this.faultInjections.lstmDown;
+    const compliance = evaluateCompliance(targetCase, actionType, this.policy);
+    if (!compliance.approved) {
+      await sqliteStore.finalizeReservation(idempotencyKey, 'POLICY_BLOCKED', compliance.explanation);
+      await sqliteStore.finalizeExecutor(idempotencyKey, 'BLOCKED', compliance.explanation);
+      await redisStore.del(lockKey);
+      return { success: false, case: targetCase, message: compliance.explanation };
+    }
     if (isVetoed && actionType !== 'ESCALATE_HUMAN_REVIEW' && actionType !== 'DO_NOTHING_VETOED') {
+      await sqliteStore.finalizeReservation(idempotencyKey, 'POLICY_BLOCKED', 'LSTM anomaly gate veto');
+      await sqliteStore.finalizeExecutor(idempotencyKey, 'BLOCKED', 'LSTM anomaly gate veto');
+      await redisStore.del(lockKey);
       return {
         success: false,
         case: targetCase,
@@ -476,8 +521,11 @@ class DataStore {
     if (actionType === 'CREATE_PAYMENT_LINK') {
       targetCase.status = 'ACTION_EXECUTED';
       targetCase.razorpayDetails = {
-        paymentLinkId: `plink_${Math.random().toString(36).substring(2, 10)}`,
-        shortUrl: `https://rzp.io/i/plink_${targetCase.caseNumber.toLowerCase().replace('-', '')}`,
+        ...razorpayOfflineAdapter.createOfflinePaymentLink({
+          amount: targetCase.amount,
+          caseId: targetCase.id,
+          customer: { name: targetCase.customer.name, phone: targetCase.customer.phone, email: targetCase.customer.email }
+        }),
         razorpayOrderId: targetCase.orderId,
         amount: targetCase.amount,
         currency: 'INR',
@@ -490,7 +538,7 @@ class DataStore {
         id: `t_${Date.now()}`,
         stage: 'ACTION_EXECUTED',
         title: 'Razorpay Payment Link Created (Test Mode API)',
-        description: `Generated short link ${targetCase.razorpayDetails.shortUrl} and sent via WhatsApp/SMS.`,
+        description: `Generated offline Razorpay SDK request ${targetCase.razorpayDetails.shortUrl}; no network call was made.`,
         timestamp: now,
         actorService: 'Razorpay Adapter',
         status: 'COMPLETED'
@@ -514,7 +562,7 @@ class DataStore {
         policyResult: 'APPROVED',
         actionTaken: 'CREATE_PAYMENT_LINK',
         apiStatusCode: 200,
-        payloadDigest: `sha256:${Math.random().toString(36).substring(2, 18)}`,
+        payloadDigest: `sha256:${crypto.createHash('sha256').update(JSON.stringify(targetCase.razorpayDetails)).digest('hex')}`,
         metadata: {
           amount: targetCase.amount,
           channel: 'PAYMENT_LINK',
@@ -559,6 +607,18 @@ class DataStore {
       });
     }
 
+    const finalStatus = targetCase.status === 'ACTION_EXECUTED' || targetCase.status === 'CUSTOMER_CONTACTED' || targetCase.status === 'HUMAN_REVIEW' ? 'COMPLETED' : 'FAILED';
+    await sqliteStore.finalizeReservation(idempotencyKey, actionType, customReason || 'Action completed by bounded gateway');
+    await sqliteStore.finalizeExecutor(idempotencyKey, finalStatus, `Action ${actionType} completed`);
+    await kafkaBus.publishToKafka('recovery.action.completed', {
+      caseId: targetCase.id,
+      actionType,
+      status: targetCase.status,
+      idempotencyKey,
+      occurredAt: now
+    });
+    await redisStore.del(lockKey);
+
     return {
       success: true,
       case: targetCase,
@@ -588,7 +648,7 @@ class DataStore {
       id: `t_rec_${Date.now()}`,
       stage: 'PAYMENT_RECOVERED',
       title: `₹${targetCase.amount.toLocaleString('en-IN')} Money Recovered!`,
-      description: 'Razorpay payment.authorized webhook received and verified via HMAC signature.',
+      description: 'Offline Razorpay provider-event simulation confirmed the payment-link state transition; no network webhook was received.',
       timestamp: now,
       actorService: 'Verification Service',
       status: 'COMPLETED'
@@ -602,7 +662,7 @@ class DataStore {
       caseNumber: targetCase.caseNumber,
       actorService: 'Verification Service',
       decision: 'RECOVERY_VERIFIED',
-      reason: 'Cryptographic webhook validation confirmed full invoice settlement.',
+      reason: 'Offline provider-event simulation confirmed full invoice settlement for the local demo.',
       mlScores: {
         diagnosisConfidence: targetCase.diagnosisConfidence,
         anomalyScore: targetCase.anomalyResult.anomalyScore
