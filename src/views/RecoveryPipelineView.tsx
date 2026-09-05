@@ -78,7 +78,7 @@ export const RecoveryPipelineView: React.FC = () => {
         ].map((caseItem) => (
           <div key={caseItem.title} className={`rounded border border-[#E2DED9] p-4 ${caseItem.accent}`}>
             <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-[#666666] font-sans font-bold">
-              <Sparkles className="h-3 w-3 text-[#C5A059]" /> Hardcoded Recommendation
+              <Sparkles className="h-3 w-3 text-[#C5A059]" /> Recommendation
             </div>
             <div className="mt-2 text-base font-bold font-serif text-[#1A1A1A]">{caseItem.title}</div>
             <p className="mt-2 text-xs leading-relaxed text-[#444444] font-sans">{caseItem.detail}</p>

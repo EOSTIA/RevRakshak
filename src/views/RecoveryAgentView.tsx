@@ -60,7 +60,7 @@ export const RecoveryAgentView: React.FC = () => {
       <div className="flex flex-col gap-2 border-b-2 border-[#1A1A1A] pb-4">
         <div className="text-[10px] uppercase tracking-[0.25em] text-[#C5A059] font-sans font-bold">Decision Support</div>
         <h1 className="text-2xl font-black tracking-tight text-[#1A1A1A] sm:text-3xl font-serif">Rule-Based Recovery Agent</h1>
-        <p className="text-xs text-[#666666] font-sans">Deterministic summary for up to 5 hardcoded cases to explain what failed, why it failed, and the best action.</p>
+        <p className="text-xs text-[#666666] font-sans">Deterministic summary for up to 5 cases to explain what failed, why it failed, and the best action.</p>
       </div>
 
       <div className="grid gap-4">
