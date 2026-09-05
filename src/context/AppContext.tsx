@@ -33,6 +33,8 @@ interface ToastNotification {
 interface AppContextType {
   activeView: ActiveView;
   setActiveView: (view: ActiveView) => void;
+  globalSearch: string;
+  setGlobalSearch: (query: string) => void;
   selectedCaseId: string | null;
   openCaseDetail: (caseId: string) => void;
   summary: DashboardSummary | null;
@@ -59,6 +61,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [activeView, setActiveView] = useState<ActiveView>('control-tower');
+  const [globalSearch, setGlobalSearch] = useState('');
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>('case_001');
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [cases, setCases] = useState<RecoveryCase[]>([]);
@@ -149,6 +152,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       value={{
         activeView,
         setActiveView,
+        globalSearch,
+        setGlobalSearch,
         selectedCaseId,
         openCaseDetail,
         summary,
