@@ -6,12 +6,16 @@ dotenv.config();
 const topic = process.env.WORKER_TOPIC || 'recovery.action.completed';
 const group = process.env.WORKER_GROUP || 'recovery-audit-worker';
 const intervalMs = Number(process.env.WORKER_POLL_MS || 2000);
+let tickInFlight = false;
 
 async function handleEvent(event: { id: string; payload: Record<string, unknown> }) {
   console.log(JSON.stringify({ worker: group, eventId: event.id, status: 'processed', payload: event.payload }));
 }
 
 async function tick() {
+  if (tickInFlight) return;
+  tickInFlight = true;
+  try {
   if (process.env.KAFKA_BROKERS) {
     await kafkaBus.publishPendingOutbox();
     await kafkaBus.consumeWithGroup(topic, group, async (event) => {
@@ -28,6 +32,9 @@ async function tick() {
     for (let partition = 0; partition < partitions; partition += 1) {
       await kafkaBus.consumeLocalWithRecovery(topic, group, async (event) => handleEvent(event), partition);
     }
+  }
+  } finally {
+    tickInFlight = false;
   }
 }
 

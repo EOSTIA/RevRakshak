@@ -55,11 +55,7 @@ export class InMemoryKafkaBus {
   async publishToKafka(topic: string, payload: Record<string, any>): Promise<KafkaEvent> {
     const event = await this.publish(topic, payload);
     if (process.env.KAFKA_BROKERS) {
-      const client = new Kafka({ clientId: 'revrakshak', brokers: process.env.KAFKA_BROKERS.split(',') });
-      const producer = client.producer();
-      await producer.connect();
-      await producer.send({ topic, messages: [{ key: event.id, value: JSON.stringify(event) }] });
-      await producer.disconnect();
+      await this.publishPendingOutbox();
     }
     return event;
   }
