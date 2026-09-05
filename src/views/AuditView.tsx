@@ -26,11 +26,21 @@ export const AuditView: React.FC = () => {
     if (filterType !== 'ALL' && log.eventType !== filterType) return false;
     if (search.trim()) {
       const q = search.toLowerCase();
-      if (
-        !log.caseNumber?.toLowerCase().includes(q) &&
-        !log.summary.toLowerCase().includes(q) &&
-        !log.id.toLowerCase().includes(q)
-      ) {
+      const searchable = [
+        log.caseNumber,
+        log.summary,
+        log.id,
+        log.eventId,
+        log.paymentId,
+        log.eventType,
+        log.actorService,
+        log.actor,
+        log.actionTaken,
+        log.reason,
+        log.payloadDigest,
+        log.signatureHash
+      ].filter(Boolean).join(' ').toLowerCase();
+      if (!searchable.includes(q)) {
         return false;
       }
     }
@@ -110,13 +120,13 @@ export const AuditView: React.FC = () => {
                         {log.caseNumber || 'SYSTEM'}
                       </span>
                       <span className="border border-[#EBE8E4] bg-[#FAF8F5] px-1.5 py-0.5 text-[9px] font-bold text-[#666666] uppercase tracking-wider">
-                        {log.eventType}
+                        {log.eventType || log.actionTaken || 'SYSTEM EVENT'}
                       </span>
                       <span className="text-[10px] text-[#888888]">
-                        by {log.actor}
+                        by {log.actor || log.actorService || 'SYSTEM'}
                       </span>
                     </div>
-                    <p className="text-xs text-[#666666] mt-0.5 font-sans">{log.summary}</p>
+                    <p className="text-xs text-[#666666] mt-0.5 font-sans">{log.summary || log.reason || 'No summary provided.'}</p>
                   </div>
                 </div>
 
@@ -124,7 +134,7 @@ export const AuditView: React.FC = () => {
                   <div className="text-right text-[10px] text-[#888888] font-sans hidden sm:block">
                     <div>{new Date(log.timestamp).toLocaleTimeString()}</div>
                     <div className="truncate max-w-[120px]">
-                      hash: {log.signatureHash.substring(0, 16)}...
+                      hash: {(log.signatureHash || log.payloadDigest || 'not recorded').substring(0, 16)}...
                     </div>
                   </div>
                   {isExpanded ? (
@@ -139,11 +149,11 @@ export const AuditView: React.FC = () => {
               {isExpanded && (
                 <div className="border-t border-[#EBE8E4] bg-[#FAF8F5] p-4 text-xs font-sans text-[#1A1A1A]">
                   <div className="flex justify-between items-center mb-2 text-[10px] text-[#888888]">
-                    <span>RECORD PAYLOAD (IMMUTABLE SHA-256: {log.signatureHash})</span>
+                    <span>RECORD PAYLOAD (SHA-256: {log.signatureHash || log.payloadDigest || 'not recorded'})</span>
                     <span className="text-[#166534] font-bold">SIGNATURE VERIFIED ✓</span>
                   </div>
                   <pre className="overflow-x-auto border border-[#EBE8E4] bg-[#FFFFFF] p-3 text-[11px] text-[#1A1A1A] font-mono">
-                    {JSON.stringify(log.payload, null, 2)}
+                    {JSON.stringify(log.payload || log.metadata || { reason: log.reason, action: log.actionTaken }, null, 2)}
                   </pre>
                 </div>
               )}
