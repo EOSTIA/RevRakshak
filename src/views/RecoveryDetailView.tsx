@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext.js';
+import { api } from '../services/api.js';
 import { StatusBadge } from '../components/common/StatusBadge.js';
 import { RiskBadge } from '../components/common/RiskBadge.js';
 import { LstmSequenceVisualizer } from '../components/common/LstmSequenceVisualizer.js';
@@ -31,6 +32,7 @@ export const RecoveryDetailView: React.FC = () => {
 
   const [isExecutionModalOpen, setIsExecutionModalOpen] = useState(false);
   const [selectedActionType, setSelectedActionType] = useState<ActionType>('CREATE_PAYMENT_LINK');
+  const [isSpeaking, setIsSpeaking] = useState(false);
 
   // Find the selected recovery case or fallback to first
   const currentCase = cases.find((c) => c.id === selectedCaseId || c.caseNumber === selectedCaseId) || cases[0];
@@ -56,6 +58,26 @@ export const RecoveryDetailView: React.FC = () => {
   const handleOpenActionModal = (action: ActionType) => {
     setSelectedActionType(action);
     setIsExecutionModalOpen(true);
+  };
+
+  const speakRecoveryScript = async () => {
+    if (!('speechSynthesis' in window)) {
+      addToast({ type: 'ERROR', title: 'Voice unavailable', message: 'This browser does not expose speech synthesis.' });
+      return;
+    }
+    setIsSpeaking(true);
+    try {
+      const translated = await api.translateMessage(`Namaste ${currentCase.customer.name.split(' ')[0]}, aapka ₹${currentCase.amount.toLocaleString('en-IN')} payment complete nahi hua. Secure payment link se dobara payment karein.`, 'hinglish');
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(translated.text);
+      utterance.lang = 'hi-IN';
+      utterance.onend = () => setIsSpeaking(false);
+      utterance.onerror = () => setIsSpeaking(false);
+      window.speechSynthesis.speak(utterance);
+    } catch (error: any) {
+      setIsSpeaking(false);
+      addToast({ type: 'ERROR', title: 'Voice script failed', message: error.message });
+    }
   };
 
   return (
@@ -120,6 +142,17 @@ export const RecoveryDetailView: React.FC = () => {
             >
               <Play className="h-3.5 w-3.5" />
               Simulate Webhook Payment
+            </button>
+          )}
+          {currentCase.customer.contactConsentGranted && !isRecovered && (
+            <button
+              onClick={speakRecoveryScript}
+              disabled={isSpeaking}
+              className="inline-flex items-center gap-2 border border-[#1A1A1A] bg-[#FFFFFF] px-4 py-2 text-xs font-bold text-[#1A1A1A] uppercase tracking-wider hover:bg-[#FAF8F5] disabled:opacity-50"
+              title="Translate and speak the recovery message only when requested"
+            >
+              <PhoneCall className="h-3.5 w-3.5" />
+              {isSpeaking ? 'Speaking...' : 'Speak recovery script'}
             </button>
           )}
         </div>
