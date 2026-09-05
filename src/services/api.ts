@@ -118,11 +118,31 @@ export const api = {
     totalRecovered: number;
     recoveredAmount: number;
     vetoedCount: number;
+    recoveryRatePercent: number;
+    exceptions: Array<{ caseId: string; reason: string }>;
   }> {
     const res = await fetch('/api/recovery/batch-run', { method: 'POST' });
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'Batch recovery failed');
     return json.data;
+  },
+
+  async seedDemoPayments(): Promise<RecoveryCase[]> {
+    const res = await fetch('/api/demo/payments/seed', { method: 'POST' });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || 'Failed to seed demo payments');
+    return json.data;
+  },
+
+  async translateMessage(text: string, to: 'en' | 'hi' | 'ta' | 'te' | 'hinglish' = 'hinglish') {
+    const res = await fetch('/api/outreach/translate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, from: 'en', to })
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || 'Translation failed');
+    return json.data as { text: string; language: string; provider: string };
   },
 
   // Customer Profile
