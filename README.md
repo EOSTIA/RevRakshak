@@ -324,14 +324,6 @@ npm run test:resilience
 python -m py_compile lstm_autoencoder.py lstm_service.py
 ```
 
-## Honest Boundaries
-
-- No live Razorpay API call is made.
-- No inbound Razorpay webhook is exposed.
-- Payment-link and payout adapters generate request shapes offline.
-- The simulated webhook endpoint changes local demo state only.
-- Recovery cases, policies, promises, and audit projections remain primarily in the process store; MySQL durably protects safety state, outbox, event log, offsets, and provider deduplication.
-- Browser SpeechSynthesis is local browser audio, not an outbound voice provider.
 
 ## Project Story
 
