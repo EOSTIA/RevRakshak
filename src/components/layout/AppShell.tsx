@@ -107,9 +107,6 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 <span className="font-black tracking-tight text-[#1A1A1A] font-serif text-base uppercase">
                   REVRAKSHAK
                 </span>
-                <span className="bg-[#1A1A1A] px-1.5 py-0.5 text-[9px] font-sans text-[#C5A059] font-bold">
-                  v3.0
-                </span>
               </div>
               <p className="text-[10px] uppercase tracking-[0.2em] text-[#C5A059] font-sans font-bold">
                 Recovery Control Plane
@@ -219,8 +216,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
             )}
           </button>
           <div className="mt-2 flex items-center justify-between text-[9px] text-[#666666] uppercase tracking-[0.2em] font-sans">
-            <span>Razorpay Track 03</span>
-            <span className="font-bold text-[#C5A059]">Autonomous</span>
+            <span>Automated Payment Testing</span>
           </div>
         </div>
       </aside>

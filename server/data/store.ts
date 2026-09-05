@@ -759,7 +759,7 @@ class DataStore {
     successful.status = 'PAYMENT_RECOVERED';
     successful.recoveredAmount = successful.amount;
     successful.recoveredAt = new Date().toISOString();
-    successful.timelineEvents = [{ id: 'demo_success_event', stage: 'PAYMENT_RECOVERED', title: 'Successful payment confirmed', description: 'Synthetic successful payment used for the local Track 3 demonstration.', timestamp: new Date().toISOString(), actorService: 'Demo Payment Generator', status: 'COMPLETED' }];
+    successful.timelineEvents = [{ id: 'demo_success_event', stage: 'PAYMENT_RECOVERED', title: 'Successful payment confirmed', description: 'Synthetic payment successful.', timestamp: new Date().toISOString(), actorService: 'Demo Payment Generator', status: 'COMPLETED' }];
     const failed = JSON.parse(JSON.stringify(this.cases[0])) as RecoveryCase;
     failed.id = `demo_payment_failed_retry_${demoRun}`;
     failed.caseNumber = `DEMO-RETRY-${demoRun}`;
@@ -774,7 +774,7 @@ class DataStore {
     failed.selectedAction = 'RETRY_SUBSCRIPTION_MANDATE';
     failed.timelineEvents = [{ id: 'demo_failed_event', stage: 'DETECTED', title: 'Failed payment received', description: 'Synthetic failed payment prepared for bounded retry demonstration.', timestamp: new Date().toISOString(), actorService: 'Demo Payment Generator', status: 'COMPLETED' }];
     this.cases.unshift(failed, successful);
-    this.auditLogs.unshift({ id: `aud_demo_${Date.now()}`, timestamp: new Date().toISOString(), eventType: 'DEMO_PAYMENTS_SEEDED', actorService: 'Demo Payment Generator', summary: 'Seeded one successful and one failed payment for Track 3 demonstration.', decision: 'SIMULATION', actionTaken: 'SEED_TWO_PAYMENT_SCENARIOS', policyResult: 'APPROVED' });
+    this.auditLogs.unshift({ id: `aud_demo_${Date.now()}`, timestamp: new Date().toISOString(), eventType: 'DEMO_PAYMENTS_SEEDED', actorService: 'Demo Payment Generator', summary: 'Seeded one successful and one failed payment.', decision: 'SIMULATION', actionTaken: 'SEED_TWO_PAYMENT_SCENARIOS', policyResult: 'APPROVED' });
     return [successful, failed];
   }
 
