@@ -142,7 +142,7 @@ export const PoliciesView: React.FC = () => {
             Natural-Language Policy Compiler (AI-Assisted)
           </h3>
           <span className="text-[11px] font-sans text-[#888888]">
-            Powered by Gemini API / Structured Parser
+            Structured Parser
           </span>
         </div>
 
