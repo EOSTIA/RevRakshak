@@ -1,0 +1,17 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+.vscode
+/Reference
+/.pytest_cache
+
+LSTM_reference.py
+
+/md
+/__pycache__
+/kafka
