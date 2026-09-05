@@ -3,10 +3,12 @@ import path from 'path';
 import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
 import { apiRouter } from './server/routes.js';
+import { validateInfrastructureConfig } from './server/services/infrastructure.js';
 
 dotenv.config();
 
 async function startServer() {
+  validateInfrastructureConfig();
   const app = express();
   const PORT = 3000;
 

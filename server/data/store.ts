@@ -30,6 +30,7 @@ import { razorpayOfflineAdapter } from '../services/razorpayAdapter.js';
 import crypto from 'node:crypto';
 import { evaluateCompliance } from '../services/compliance.js';
 import { scoreWithPythonLstm } from '../services/lstmClient.js';
+import { translateRecoveryMessage } from '../services/translation.js';
 
 class DataStore {
   public cases: RecoveryCase[] = JSON.parse(JSON.stringify(INITIAL_RECOVERY_CASES));
@@ -518,7 +519,7 @@ class DataStore {
     targetCase.updatedAt = now;
 
     // Build timeline events
-    if (actionType === 'CREATE_PAYMENT_LINK') {
+    if (actionType === 'CREATE_PAYMENT_LINK' || actionType === 'SWITCH_PAYMENT_METHOD') {
       targetCase.status = 'ACTION_EXECUTED';
       targetCase.razorpayDetails = {
         ...razorpayOfflineAdapter.createOfflinePaymentLink({
@@ -569,6 +570,47 @@ class DataStore {
           customer: targetCase.customer.name
         }
       });
+    } else if (actionType === 'RETRY_SUBSCRIPTION_MANDATE') {
+      const maxAttempts = 3;
+      let recovered = false;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        const retryable = ['NETWORK_FAILURE', 'SUBSCRIPTION_MANDATE_FAILED', 'AUTHENTICATION_3DS_TIMEOUT', 'UPI_COLLECT_EXPIRED'].includes(targetCase.failureCause);
+        recovered = retryable && attempt === 1;
+        targetCase.timelineEvents.push({
+          id: `retry_${Date.now()}_${attempt}`,
+          stage: recovered ? 'ACTION_EXECUTED' : 'RECOVERY_FAILED',
+          title: `Bounded Retry Attempt ${attempt} of ${maxAttempts}`,
+          description: recovered ? 'Retry succeeded within the deterministic attempt bound.' : `Retry stopped after attempt ${attempt}; no further automated retry is allowed.`,
+          timestamp: new Date().toISOString(),
+          actorService: 'Mandate Retry Sequencer',
+          status: recovered ? 'COMPLETED' : attempt === maxAttempts ? 'FAILED' : 'IN_PROGRESS'
+        });
+        if (recovered) break;
+      }
+      targetCase.status = recovered ? 'ACTION_EXECUTED' : 'RECOVERY_FAILED';
+      targetCase.isException = !recovered;
+      targetCase.exceptionReason = recovered ? undefined : 'Bounded retry sequence exhausted without recovery.';
+    } else if (actionType === 'SEND_HINGLISH_SMS_NUDGE') {
+      const translated = await translateRecoveryMessage(`Payment failed for ₹${targetCase.amount.toLocaleString('en-IN')}. Please use the secure payment link to try again.`, 'en', 'hinglish');
+      targetCase.messageContent = { language: translated.language, template: 'RECOVERY_PAYMENT_NUDGE', text: translated.text };
+      targetCase.status = 'CUSTOMER_CONTACTED';
+      targetCase.timelineEvents.push({ id: `sms_${Date.now()}`, stage: 'CUSTOMER_CONTACTED', title: 'Translated recovery SMS prepared', description: `${translated.provider} generated the customer message; no message provider was called.`, timestamp: now, actorService: 'Translation and Outreach Service', status: 'COMPLETED' });
+    } else if (actionType === 'REQUEST_PROMISE_TO_PAY') {
+      targetCase.status = 'CUSTOMER_CONTACTED';
+      this.promises.unshift({
+        id: `ptp_${Date.now()}`,
+        caseId: targetCase.id,
+        caseNumber: targetCase.caseNumber,
+        customerName: targetCase.customer.name,
+        customerPhone: targetCase.customer.phone,
+        amount: targetCase.amount,
+        promisedDate: new Date(Date.now() + 86400000).toISOString(),
+        status: 'ACTIVE',
+        channel: 'PAYMENT_LINK',
+        reminderScheduledAt: new Date(Date.now() + 43200000).toISOString(),
+        notes: customReason || 'Promise captured by bounded recovery workflow.'
+      });
+      targetCase.timelineEvents.push({ id: `ptp_${Date.now()}`, stage: 'CUSTOMER_CONTACTED', title: 'Promise-to-pay request recorded', description: 'Customer commitment is queued for a scheduled follow-up and remains bounded by the contact policy.', timestamp: now, actorService: 'Promise-to-Pay Tracker', status: 'IN_PROGRESS' });
     } else if (actionType === 'OUTBOUND_VOICE_CALL') {
       // Check voice service fault
       if (this.faultInjections.voiceDown) {
@@ -594,6 +636,11 @@ class DataStore {
           status: 'COMPLETED'
         });
       }
+      const translated = await translateRecoveryMessage(`Namaste ${targetCase.customer.name.split(' ')[0]}, your payment of ₹${targetCase.amount.toLocaleString('en-IN')} needs attention. Please use the secure payment link to complete it.`, 'en', 'hinglish');
+      targetCase.messageContent = { language: translated.language, template: 'RECOVERY_VOICE_SCRIPT', text: translated.text };
+    } else if (actionType === 'DO_NOTHING_VETOED') {
+      targetCase.status = 'NO_ACTION';
+      targetCase.timelineEvents.push({ id: `veto_${Date.now()}`, stage: 'NO_ACTION', title: 'Automation stopped by safety policy', description: 'No external action was attempted after the risk or compliance gate.', timestamp: now, actorService: 'Policy Engine', status: 'SKIPPED' });
     } else if (actionType === 'ESCALATE_HUMAN_REVIEW') {
       targetCase.status = 'HUMAN_REVIEW';
       targetCase.timelineEvents.push({
@@ -607,7 +654,23 @@ class DataStore {
       });
     }
 
-    const finalStatus = targetCase.status === 'ACTION_EXECUTED' || targetCase.status === 'CUSTOMER_CONTACTED' || targetCase.status === 'HUMAN_REVIEW' ? 'COMPLETED' : 'FAILED';
+    const finalStatus = ['ACTION_EXECUTED', 'CUSTOMER_CONTACTED', 'HUMAN_REVIEW', 'NO_ACTION'].includes(targetCase.status) ? 'COMPLETED' : 'FAILED';
+    if (actionType !== 'CREATE_PAYMENT_LINK' && actionType !== 'SWITCH_PAYMENT_METHOD') {
+      this.auditLogs.unshift({
+        id: `aud_action_${Date.now()}`,
+        timestamp: now,
+        eventType: 'RECOVERY_ACTION_EXECUTED',
+        eventId: `evt_${crypto.randomUUID()}`,
+        paymentId: targetCase.paymentId,
+        caseNumber: targetCase.caseNumber,
+        actorService: 'Action Gateway',
+        decision: actionType,
+        reason: customReason || 'Action passed deterministic policy and compliance checks.',
+        policyResult: 'APPROVED',
+        actionTaken: actionType,
+        metadata: { status: targetCase.status, failureCause: targetCase.failureCause }
+      });
+    }
     await sqliteStore.finalizeReservation(idempotencyKey, actionType, customReason || 'Action completed by bounded gateway');
     await sqliteStore.finalizeExecutor(idempotencyKey, finalStatus, `Action ${actionType} completed`);
     await kafkaBus.publishToKafka('recovery.action.completed', {
@@ -632,6 +695,8 @@ class DataStore {
     if (!targetCase) {
       throw new Error(`Case ${caseId} not found`);
     }
+    if (targetCase.status === 'PAYMENT_RECOVERED') return { success: true, case: targetCase, message: 'Payment was already reconciled; duplicate recovery confirmation ignored.' };
+    if (!['ACTION_EXECUTED', 'CUSTOMER_CONTACTED'].includes(targetCase.status)) throw new Error('Payment cannot be reconciled before a recovery action is executed.');
 
     const now = new Date().toISOString();
     targetCase.status = 'PAYMENT_RECOVERED';
@@ -684,29 +749,66 @@ class DataStore {
     };
   }
 
-  // Run Batch Recovery Execution (for live testing on 50+ cases)
-  public runBatchRecovery(): { totalProcessed: number; totalRecovered: number; recoveredAmount: number; vetoedCount: number } {
+  public seedDemoPayments() {
+    this.cases = this.cases.filter((item) => !item.id.startsWith('demo_payment_'));
+    const demoRun = Date.now();
+    const successful = JSON.parse(JSON.stringify(this.cases[0])) as RecoveryCase;
+    successful.id = `demo_payment_success_${demoRun}`;
+    successful.caseNumber = `DEMO-SUCCESS-${demoRun}`;
+    successful.paymentId = `pay_demo_success_${demoRun}`;
+    successful.status = 'PAYMENT_RECOVERED';
+    successful.recoveredAmount = successful.amount;
+    successful.recoveredAt = new Date().toISOString();
+    successful.timelineEvents = [{ id: 'demo_success_event', stage: 'PAYMENT_RECOVERED', title: 'Successful payment confirmed', description: 'Synthetic successful payment used for the local Track 3 demonstration.', timestamp: new Date().toISOString(), actorService: 'Demo Payment Generator', status: 'COMPLETED' }];
+    const failed = JSON.parse(JSON.stringify(this.cases[0])) as RecoveryCase;
+    failed.id = `demo_payment_failed_retry_${demoRun}`;
+    failed.caseNumber = `DEMO-RETRY-${demoRun}`;
+    failed.paymentId = `pay_demo_failed_${demoRun}`;
+    failed.status = 'DETECTED';
+    failed.failureCause = 'NETWORK_FAILURE';
+    failed.failureCode = 'DEMO_NETWORK_TIMEOUT';
+    failed.failureReasonDetails = 'Synthetic network timeout requiring one bounded retry.';
+    failed.customer.contactConsentGranted = true;
+    failed.customer.currentAnomalyScore = 0.08;
+    failed.anomalyResult = { ...failed.anomalyResult, anomalyScore: 0.08, decision: 'PASS', reason: 'Synthetic retry case uses normal payment pacing.', featureErrors: [], isFallbackActive: false };
+    failed.selectedAction = 'RETRY_SUBSCRIPTION_MANDATE';
+    failed.timelineEvents = [{ id: 'demo_failed_event', stage: 'DETECTED', title: 'Failed payment received', description: 'Synthetic failed payment prepared for bounded retry demonstration.', timestamp: new Date().toISOString(), actorService: 'Demo Payment Generator', status: 'COMPLETED' }];
+    this.cases.unshift(failed, successful);
+    this.auditLogs.unshift({ id: `aud_demo_${Date.now()}`, timestamp: new Date().toISOString(), eventType: 'DEMO_PAYMENTS_SEEDED', actorService: 'Demo Payment Generator', summary: 'Seeded one successful and one failed payment for Track 3 demonstration.', decision: 'SIMULATION', actionTaken: 'SEED_TWO_PAYMENT_SCENARIOS', policyResult: 'APPROVED' });
+    return [successful, failed];
+  }
+
+  // Run a deterministic, measured batch simulation with explicit exceptions.
+  public runBatchRecovery(): { totalProcessed: number; totalRecovered: number; recoveredAmount: number; vetoedCount: number; recoveryRatePercent: number; exceptions: Array<{ caseId: string; reason: string }> } {
     let recoveredCount = 0;
     let recoveredAmount = 0;
     let vetoedCount = 0;
+    const exceptions: Array<{ caseId: string; reason: string }> = [];
 
     this.cases.forEach(c => {
       if (c.status === 'POLICY_BLOCKED' || c.anomalyResult.decision === 'VETO') {
         vetoedCount++;
+        exceptions.push({ caseId: c.id, reason: c.exceptionReason || 'Risk or policy veto' });
       } else if (c.status !== 'PAYMENT_RECOVERED' && c.failureCause !== 'CARD_DECLINED_HARD') {
         c.status = 'PAYMENT_RECOVERED';
         c.recoveredAmount = c.amount;
         c.recoveredAt = new Date().toISOString();
         recoveredCount++;
         recoveredAmount += c.amount;
+      } else if (c.status !== 'PAYMENT_RECOVERED') {
+        exceptions.push({ caseId: c.id, reason: 'Hard decline is not eligible for automated recovery.' });
       }
     });
+
+    this.auditLogs.unshift({ id: `aud_batch_${Date.now()}`, timestamp: new Date().toISOString(), eventType: 'BATCH_RECOVERY_MEASURED', actorService: 'Recovery Batch Evaluator', summary: `Measured ${recoveredCount} recoveries from ${this.cases.length} synthetic cases.`, decision: 'BOUNDED_BATCH_RUN', actionTaken: 'MEASURE_RECOVERY', policyResult: 'APPROVED', metadata: { recoveredAmount, vetoedCount, exceptionCount: exceptions.length } });
 
     return {
       totalProcessed: this.cases.length,
       totalRecovered: recoveredCount,
       recoveredAmount,
-      vetoedCount
+      vetoedCount,
+      recoveryRatePercent: Number(((recoveredCount / Math.max(this.cases.length, 1)) * 100).toFixed(1)),
+      exceptions
     };
   }
 

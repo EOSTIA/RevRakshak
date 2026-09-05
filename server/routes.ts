@@ -1,6 +1,9 @@
 import express from 'express';
 import { store } from './data/store.js';
 import { compileNaturalLanguagePolicy } from './services/policyCompiler.js';
+import { z } from 'zod';
+import { ActionRequestSchema, PolicyUpdateSchema, PromiseRequestSchema, TranslationRequestSchema } from './services/dtos.js';
+import { translateRecoveryMessage } from './services/translation.js';
 
 export const apiRouter = express.Router();
 
@@ -128,13 +131,11 @@ apiRouter.get('/recovery/:id', (req, res) => {
 });
 
 // 5. Action Gateway Execute
-apiRouter.post('/recovery/:id/execute', (req, res) => {
+apiRouter.post('/recovery/:id/execute', async (req, res) => {
   try {
-    const { actionType, reason } = req.body;
-    if (!actionType) {
-      return res.status(400).json({ success: false, error: 'actionType is required' });
-    }
-    const result = store.executeAction(req.params.id, actionType, reason);
+    const request = ActionRequestSchema.safeParse(req.body);
+    if (!request.success) return res.status(400).json({ success: false, error: 'Invalid action request', details: request.error.flatten() });
+    const result = await store.executeAction(req.params.id, request.data.actionType, request.data.reason);
     res.json(result);
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message });
@@ -174,6 +175,10 @@ apiRouter.post('/recovery/batch-run', (req, res) => {
   }
 });
 
+apiRouter.post('/demo/payments/seed', (_req, res) => {
+  res.json({ success: true, data: store.seedDemoPayments() });
+});
+
 // 7. Customers / Customer Profile
 apiRouter.get('/customers/:id', (req, res) => {
   try {
@@ -194,9 +199,11 @@ apiRouter.get('/policies', (req, res) => {
 
 apiRouter.put('/policies', (req, res) => {
   try {
+    const update = PolicyUpdateSchema.safeParse(req.body);
+    if (!update.success) return res.status(400).json({ success: false, error: 'Invalid policy DTO', details: update.error.flatten() });
     store.policy = {
       ...store.policy,
-      ...req.body,
+      ...update.data,
       updatedAt: new Date().toISOString()
     };
     res.json({ success: true, data: store.policy });
@@ -226,8 +233,10 @@ apiRouter.get('/promises', (req, res) => {
 
 apiRouter.post('/promises', (req, res) => {
   try {
+    const parsed = PromiseRequestSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, error: 'Invalid promise DTO', details: parsed.error.flatten() });
     const newPromise = {
-      ...req.body,
+      ...parsed.data,
       id: `ptp_${Date.now()}`
     };
     store.promises.unshift(newPromise);
@@ -235,6 +244,13 @@ apiRouter.post('/promises', (req, res) => {
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message });
   }
+});
+
+apiRouter.post('/outreach/translate', async (req, res) => {
+  const parsed = TranslationRequestSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ success: false, error: 'Invalid translation DTO', details: parsed.error.flatten() });
+  const result = await translateRecoveryMessage(parsed.data.text, parsed.data.from, parsed.data.to);
+  res.json({ success: true, data: result });
 });
 
 // 10. Audit Trail
@@ -283,6 +299,15 @@ apiRouter.get('/system/kafka', async (req, res) => {
   try {
     const { kafkaBus } = await import('./services/kafkaBus.js');
     res.json({ success: true, data: { topics: kafkaBus.getTopics(), traffic: kafkaBus.getTrafficSnapshot() } });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+apiRouter.get('/system/storage', async (_req, res) => {
+  try {
+    const { sqliteStore } = require('./services/sqliteStore.js');
+    res.json({ success: true, data: await sqliteStore.getStats() });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
